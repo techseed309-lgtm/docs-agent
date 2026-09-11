@@ -1,0 +1,7 @@
+# Dependencies for scripts/*.py. Standard library first — anything here has a stated
+# reason the stdlib doesn't cover (see CLAUDE.md working agreement).
+#
+# psycopg2-binary: Postgres has no client in the Python standard library at all.
+# This is the standard, most-documented driver; the "-binary" build ships a
+# prebuilt wheel so no C compiler/toolchain is needed on the dev machine.
+psycopg2-binary==2.9.10

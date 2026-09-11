@@ -1,0 +1,878 @@
+{
+  "id": "H8Q5Z5fwrypzf1nf",
+  "name": "docs-agent: ingest",
+  "description": null,
+  "active": true,
+  "activeVersionId": "7d516cfa-9b1a-4d68-8367-d2b4e9ff89cc",
+  "createdAt": "2026-09-11T20:29:49.638Z",
+  "updatedAt": "2026-09-11T22:10:26.377Z",
+  "isArchived": false,
+  "versionId": "7d516cfa-9b1a-4d68-8367-d2b4e9ff89cc",
+  "versionCounter": 6,
+  "sourceWorkflowId": null,
+  "triggerCount": 2,
+  "nodes": [
+    {
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "docs-agent-ingest-trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        620
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ingest-trigger",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "read-files",
+      "name": "Read PDFs",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        220,
+        380
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "/data/corpus/sample/*.pdf",
+        "options": {}
+      }
+    },
+    {
+      "id": "extract-pdf",
+      "name": "Extract from File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        440,
+        380
+      ],
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "data"
+      }
+    },
+    {
+      "id": "prepare-document",
+      "name": "Prepare Document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        380
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const crypto = require('crypto');\nconst fileName = $('Read PDFs').item.binary.data.fileName || 'unknown.pdf';\nconst text = $json.text || '';\nconst contentSha = crypto.createHash('sha256').update(text).digest('hex');\nconst title = fileName.replace(/\\.pdf$/i, '');\nreturn {\n  json: {\n    source_path: `corpus/sample/${fileName}`,\n    title,\n    tenant: 'default',\n    content_sha: contentSha,\n    text\n  }\n};"
+      }
+    },
+    {
+      "id": "check-existing",
+      "name": "Check Existing",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        760,
+        380
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT $1::text AS tenant, $2::text AS source_path, $3::text AS title,\n       $4::text AS content_sha, $5::text AS text,\n       (d.content_sha IS DISTINCT FROM $4) AS needs_reingest\nFROM (SELECT 1) AS dummy\nLEFT JOIN documents d ON d.tenant = $1 AND d.source_path = $2",
+        "options": {
+          "queryReplacement": "={{ [$json.tenant, $json.source_path, $json.title, $json.content_sha, $json.text] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "fodXMAIpTqhUIcoQ",
+          "name": "Postgres (vectors)"
+        }
+      }
+    },
+    {
+      "id": "filter-changed",
+      "name": "Filter Changed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        380
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return items.filter(item => item.json.needs_reingest === true);"
+      }
+    },
+    {
+      "id": "upsert-document",
+      "name": "Upsert Document",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        380
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO documents (tenant, source_path, title, content_sha)\nVALUES ($1, $2, $3, $4)\nON CONFLICT (tenant, source_path)\nDO UPDATE SET content_sha = EXCLUDED.content_sha, title = EXCLUDED.title, ingested_at = now()\nRETURNING id, tenant, $5::text AS text",
+        "options": {
+          "queryReplacement": "={{ [$json.tenant, $json.source_path, $json.title, $json.content_sha, $json.text] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "fodXMAIpTqhUIcoQ",
+          "name": "Postgres (vectors)"
+        }
+      }
+    },
+    {
+      "id": "delete-old-chunks",
+      "name": "Delete Old Chunks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1100,
+        380
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH deleted AS (\n  DELETE FROM chunks WHERE document_id = $1\n  RETURNING 1\n)\nSELECT $1::bigint AS document_id, $2::text AS tenant, $3::text AS text, COUNT(*) AS deleted_count\nFROM deleted",
+        "options": {
+          "queryReplacement": "={{ [$json.id, $json.tenant, $json.text] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "fodXMAIpTqhUIcoQ",
+          "name": "Postgres (vectors)"
+        }
+      }
+    },
+    {
+      "id": "chunk-text",
+      "name": "Chunk Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        380
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const CHUNK_SIZE = 1200; // characters -- M1 baseline, tuned in M4 (see PLAN.md)\nconst CHUNK_OVERLAP = 150;\n\nconst output = [];\nfor (let i = 0; i < items.length; i++) {\n  const documentId = items[i].json.document_id;\n  const tenant = items[i].json.tenant;\n  const text = items[i].json.text;\n\n  let start = 0;\n  let chunkIndex = 0;\n  while (start < text.length) {\n    const end = Math.min(start + CHUNK_SIZE, text.length);\n    const content = text.slice(start, end);\n    output.push({\n      json: {\n        document_id: documentId,\n        tenant,\n        chunk_index: chunkIndex,\n        content,\n        token_count: Math.ceil(content.length / 4)\n      }\n    });\n    chunkIndex++;\n    if (end === text.length) break;\n    start = end - CHUNK_OVERLAP;\n  }\n}\nreturn output;"
+      }
+    },
+    {
+      "id": "loop-chunks",
+      "name": "Loop Over Chunks",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1540,
+        380
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "embed-chunk",
+      "name": "Embed Chunk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        380
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_BASE_URL }}/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.EMBEDDING_MODEL, prompt: $json.content }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "insert-chunk",
+      "name": "Insert Chunk",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1760,
+        380
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO chunks (document_id, tenant, chunk_index, content, token_count, embedding)\nVALUES ($1, $2, $3, $4, $5, $6::vector)",
+        "options": {
+          "queryReplacement": "={{ [$('Chunk Text').item.json.document_id, $('Chunk Text').item.json.tenant, $('Chunk Text').item.json.chunk_index, $('Chunk Text').item.json.content, $('Chunk Text').item.json.token_count, '[' + $json.embedding.join(',') + ']'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "fodXMAIpTqhUIcoQ",
+          "name": "Postgres (vectors)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read PDFs": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Prepare Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Document": {
+      "main": [
+        [
+          {
+            "node": "Check Existing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Document": {
+      "main": [
+        [
+          {
+            "node": "Delete Old Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Old Chunks": {
+      "main": [
+        [
+          {
+            "node": "Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Text": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Chunks": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Embed Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Chunk": {
+      "main": [
+        [
+          {
+            "node": "Insert Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Chunk": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing": {
+      "main": [
+        [
+          {
+            "node": "Filter Changed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Changed": {
+      "main": [
+        [
+          {
+            "node": "Upsert Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {},
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "H8Q5Z5fwrypzf1nf",
+      "projectId": "GL7A99v356tRzDk1",
+      "project": {
+        "id": "GL7A99v356tRzDk1",
+        "name": "Benen Mekonnen <mekonnenbenen00@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "35c83266-5b54-4c20-b9ce-d663cc28426d",
+        "createdAt": "2026-09-11T17:59:51.129Z",
+        "updatedAt": "2026-09-11T18:05:39.464Z"
+      },
+      "createdAt": "2026-09-11T20:29:49.638Z",
+      "updatedAt": "2026-09-11T20:29:49.638Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "7d516cfa-9b1a-4d68-8367-d2b4e9ff89cc",
+    "workflowId": "H8Q5Z5fwrypzf1nf",
+    "nodes": [
+      {
+        "id": "manual-trigger",
+        "name": "Manual Trigger",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          300
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "schedule-trigger",
+        "name": "Schedule Trigger",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          460
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "days",
+                "daysInterval": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "webhook-trigger",
+        "name": "Webhook Trigger",
+        "webhookId": "docs-agent-ingest-trigger",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          620
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "ingest-trigger",
+          "responseMode": "onReceived",
+          "options": {}
+        }
+      },
+      {
+        "id": "read-files",
+        "name": "Read PDFs",
+        "type": "n8n-nodes-base.readWriteFile",
+        "typeVersion": 1,
+        "position": [
+          220,
+          380
+        ],
+        "parameters": {
+          "operation": "read",
+          "fileSelector": "/data/corpus/sample/*.pdf",
+          "options": {}
+        }
+      },
+      {
+        "id": "extract-pdf",
+        "name": "Extract from File",
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          440,
+          380
+        ],
+        "parameters": {
+          "operation": "pdf",
+          "binaryPropertyName": "data"
+        }
+      },
+      {
+        "id": "prepare-document",
+        "name": "Prepare Document",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          660,
+          380
+        ],
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const crypto = require('crypto');\nconst fileName = $('Read PDFs').item.binary.data.fileName || 'unknown.pdf';\nconst text = $json.text || '';\nconst contentSha = crypto.createHash('sha256').update(text).digest('hex');\nconst title = fileName.replace(/\\.pdf$/i, '');\nreturn {\n  json: {\n    source_path: `corpus/sample/${fileName}`,\n    title,\n    tenant: 'default',\n    content_sha: contentSha,\n    text\n  }\n};"
+        }
+      },
+      {
+        "id": "check-existing",
+        "name": "Check Existing",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          760,
+          380
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT $1::text AS tenant, $2::text AS source_path, $3::text AS title,\n       $4::text AS content_sha, $5::text AS text,\n       (d.content_sha IS DISTINCT FROM $4) AS needs_reingest\nFROM (SELECT 1) AS dummy\nLEFT JOIN documents d ON d.tenant = $1 AND d.source_path = $2",
+          "options": {
+            "queryReplacement": "={{ [$json.tenant, $json.source_path, $json.title, $json.content_sha, $json.text] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "fodXMAIpTqhUIcoQ",
+            "name": "Postgres (vectors)"
+          }
+        }
+      },
+      {
+        "id": "filter-changed",
+        "name": "Filter Changed",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          860,
+          380
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "return items.filter(item => item.json.needs_reingest === true);"
+        }
+      },
+      {
+        "id": "upsert-document",
+        "name": "Upsert Document",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          880,
+          380
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO documents (tenant, source_path, title, content_sha)\nVALUES ($1, $2, $3, $4)\nON CONFLICT (tenant, source_path)\nDO UPDATE SET content_sha = EXCLUDED.content_sha, title = EXCLUDED.title, ingested_at = now()\nRETURNING id, tenant, $5::text AS text",
+          "options": {
+            "queryReplacement": "={{ [$json.tenant, $json.source_path, $json.title, $json.content_sha, $json.text] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "fodXMAIpTqhUIcoQ",
+            "name": "Postgres (vectors)"
+          }
+        }
+      },
+      {
+        "id": "delete-old-chunks",
+        "name": "Delete Old Chunks",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1100,
+          380
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "WITH deleted AS (\n  DELETE FROM chunks WHERE document_id = $1\n  RETURNING 1\n)\nSELECT $1::bigint AS document_id, $2::text AS tenant, $3::text AS text, COUNT(*) AS deleted_count\nFROM deleted",
+          "options": {
+            "queryReplacement": "={{ [$json.id, $json.tenant, $json.text] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "fodXMAIpTqhUIcoQ",
+            "name": "Postgres (vectors)"
+          }
+        }
+      },
+      {
+        "id": "chunk-text",
+        "name": "Chunk Text",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1320,
+          380
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const CHUNK_SIZE = 1200; // characters -- M1 baseline, tuned in M4 (see PLAN.md)\nconst CHUNK_OVERLAP = 150;\n\nconst output = [];\nfor (let i = 0; i < items.length; i++) {\n  const documentId = items[i].json.document_id;\n  const tenant = items[i].json.tenant;\n  const text = items[i].json.text;\n\n  let start = 0;\n  let chunkIndex = 0;\n  while (start < text.length) {\n    const end = Math.min(start + CHUNK_SIZE, text.length);\n    const content = text.slice(start, end);\n    output.push({\n      json: {\n        document_id: documentId,\n        tenant,\n        chunk_index: chunkIndex,\n        content,\n        token_count: Math.ceil(content.length / 4)\n      }\n    });\n    chunkIndex++;\n    if (end === text.length) break;\n    start = end - CHUNK_OVERLAP;\n  }\n}\nreturn output;"
+        }
+      },
+      {
+        "id": "loop-chunks",
+        "name": "Loop Over Chunks",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          1540,
+          380
+        ],
+        "parameters": {
+          "batchSize": 1,
+          "options": {}
+        }
+      },
+      {
+        "id": "embed-chunk",
+        "name": "Embed Chunk",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1540,
+          380
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.OLLAMA_BASE_URL }}/api/embeddings",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: $env.EMBEDDING_MODEL, prompt: $json.content }) }}",
+          "options": {
+            "timeout": 120000
+          }
+        }
+      },
+      {
+        "id": "insert-chunk",
+        "name": "Insert Chunk",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1760,
+          380
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO chunks (document_id, tenant, chunk_index, content, token_count, embedding)\nVALUES ($1, $2, $3, $4, $5, $6::vector)",
+          "options": {
+            "queryReplacement": "={{ [$('Chunk Text').item.json.document_id, $('Chunk Text').item.json.tenant, $('Chunk Text').item.json.chunk_index, $('Chunk Text').item.json.content, $('Chunk Text').item.json.token_count, '[' + $json.embedding.join(',') + ']'] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "fodXMAIpTqhUIcoQ",
+            "name": "Postgres (vectors)"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Manual Trigger": {
+        "main": [
+          [
+            {
+              "node": "Read PDFs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "Read PDFs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook Trigger": {
+        "main": [
+          [
+            {
+              "node": "Read PDFs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read PDFs": {
+        "main": [
+          [
+            {
+              "node": "Extract from File",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract from File": {
+        "main": [
+          [
+            {
+              "node": "Prepare Document",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Document": {
+        "main": [
+          [
+            {
+              "node": "Check Existing",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upsert Document": {
+        "main": [
+          [
+            {
+              "node": "Delete Old Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Delete Old Chunks": {
+        "main": [
+          [
+            {
+              "node": "Chunk Text",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Chunk Text": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Over Chunks": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Embed Chunk",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Embed Chunk": {
+        "main": [
+          [
+            {
+              "node": "Insert Chunk",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Insert Chunk": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Existing": {
+        "main": [
+          [
+            {
+              "node": "Filter Changed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filter Changed": {
+        "main": [
+          [
+            {
+              "node": "Upsert Document",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Benen Mekonnen",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-09-11T22:10:26.381Z",
+    "updatedAt": "2026-09-11T22:10:26.381Z",
+    "workflowPublishHistory": [
+      {
+        "id": 9,
+        "workflowId": "H8Q5Z5fwrypzf1nf",
+        "versionId": "7d516cfa-9b1a-4d68-8367-d2b4e9ff89cc",
+        "event": "activated",
+        "userId": "35c83266-5b54-4c20-b9ce-d663cc28426d",
+        "createdAt": "2026-09-11T22:10:26.828Z"
+      }
+    ]
+  }
+}

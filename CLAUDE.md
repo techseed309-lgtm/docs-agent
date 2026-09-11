@@ -21,9 +21,12 @@ and error handling that doesn't fail silently.
   Pinecone/Qdrant/Weaviate/etc. — cutting that dependency is a deliberate cost decision
   and part of the pitch.
 - Embeddings and chat model are **configurable via env vars** (`EMBEDDING_MODEL`,
-  `CHAT_MODEL` in `.env`); default embedding model is OpenAI `text-embedding-3-small`.
-  Never hardcode a model name inside a workflow node — read it from an env/credential
-  expression instead.
+  `CHAT_MODEL` in `.env`); never hardcode a model name inside a workflow node — read
+  it from an env/credential expression instead. Default is **fully self-hosted via
+  Ollama** (`nomic-embed-text` for embeddings, `llama3.2` for chat) — zero external
+  API cost, zero API key, nothing in the corpus leaves the host. Changed from the
+  original brief's OpenAI default; see "Environment notes" below for why and what
+  it costs to switch back.
 - **Python 3.11+** for scripts. Standard library first; any dependency needs a stated
   reason the stdlib doesn't cover.
 - Demo UI is **one static HTML file** — no build step, no framework.
@@ -108,3 +111,26 @@ See [PLAN.md](PLAN.md) for the full list and current checkbox state.
   handle the space correctly already. If this repo ever grows multiple contributors
   or CI runners with less predictable path handling, revisit the rename — it's cheap
   to do later, just disruptive to do mid-session.
+- Two host port collisions found and fixed while bringing M1's postgres back up:
+  a native Windows Postgres service already on 5432, and an unrelated Docker
+  project's Postgres already on 5433. Moved this project's postgres to host port
+  `55432` (see docker-compose.yml). n8n's own connection to postgres is over the
+  internal Docker network on 5432 regardless -- only host tools (scripts/*.py) use
+  the remapped port.
+- **Switched the default model provider from OpenAI to self-hosted Ollama**
+  (explicit decision, not the brief's original default) to satisfy a hard "zero
+  spend beyond the Claude subscription" constraint -- OpenRouter was considered
+  first but only proxies *paid* embedding providers, it doesn't offer a free
+  embedding model. Ollama runs as its own docker-compose service; `nomic-embed-text`
+  (768-dim) handles embeddings, `llama3.2` handles chat, both pulled once into the
+  `ollama_data` volume. Consequences worth remembering:
+  - `db/init/02-schema.sql` uses `VECTOR(768)`, not the brief's `VECTOR(1536)` --
+    768 is `nomic-embed-text`'s output width. Switching to a different embedding
+    model later means changing this column's width (and re-ingesting everything),
+    not just an env var.
+  - Switching *back* to OpenAI means more than an env var too: it means using
+    n8n's OpenAI nodes instead of the Ollama ones in every workflow, an OpenAI API
+    key + n8n credential, and reverting the schema to `VECTOR(1536)`.
+  - Local inference adds real RAM/CPU load to whatever machine runs it -- a
+    consideration for the eventual VPS deploy target (see the original brief's
+    notes on memory sizing), not just this dev machine.

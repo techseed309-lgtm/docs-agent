@@ -15,7 +15,11 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "5432:5432"
+      # Host port 55432, deliberately uncommon: this dev machine already has a
+      # native Postgres on 5432 AND other unrelated Docker projects on 5433/5434.
+      # n8n itself reaches postgres over the internal Docker network on 5432
+      # regardless; this host port is only for host tools like scripts/*.py.
+      - "55432:5432"
 
   n8n:
     image: docker.n8n.io/n8nio/n8n
@@ -40,11 +44,48 @@ services:
       N8N_DIAGNOSTICS_ENABLED: "false"
       EXECUTIONS_DATA_MAX_AGE: 168
       EXECUTIONS_DATA_PRUNE_MAX_COUNT: 10000
+      # Least-privilege: the ingest workflow's file-read node may only touch this
+      # one bind-mounted, read-only path, not the rest of the container filesystem.
+      N8N_RESTRICT_FILE_ACCESS_TO: /data/corpus
+      # Lets Code nodes `require('crypto')` for content_sha hashing -- nothing
+      # broader than that one built-in module.
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      # Internal Docker network address -- NOT .env's host-facing OLLAMA_BASE_URL
+      # (localhost wouldn't resolve to the ollama container from inside n8n's own).
+      # Workflows read model names from EMBEDDING_MODEL/CHAT_MODEL via $env,
+      # never hardcoded -- see CLAUDE.md.
+      OLLAMA_BASE_URL: http://ollama:11434
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      CHAT_MODEL: ${CHAT_MODEL}
+      # Explicit, not relying on the default: workflows read model names and the
+      # Ollama URL via $env in expressions (see above).
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
     ports:
       - "${N8N_PORT}:5678"
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./corpus:/data/corpus:ro
+
+  # Local, self-hosted embeddings + chat -- zero external API cost, zero API key,
+  # and nothing in the corpus ever leaves this machine. n8n reaches it over the
+  # internal Docker network at http://ollama:11434; the host port below is only
+  # for `docker compose exec` / manual `ollama pull` from outside the container.
+  # CPU-only by default; add a `deploy.resources.reservations.devices` GPU block
+  # here later if the deploy target has one.
+  ollama:
+    image: ollama/ollama
+    restart: unless-stopped
+    environment:
+      # Explicit, not relying on the default: CPU-only, one request at a time.
+      # The ingest workflow also throttles itself to match (see workflows/01-ingest.json).
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_QUEUE: 512
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
 
 volumes:
   pgdata:
   n8n_data:
+  ollama_data:

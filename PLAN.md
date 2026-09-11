@@ -32,11 +32,87 @@ skip if unchanged).
 chunk count the second time and re-embeds nothing, and `scripts/ingest_check.py` reports
 chunk counts and confirms every embedding is 1536-dimensional.
 
-- [ ] `db/init/02-schema.sql`
-- [ ] Sample corpus committed to `corpus/sample/`
-- [ ] Ingestion workflow (n8n), exported to `workflows/`
-- [ ] `scripts/ingest_check.py` implemented
-- [ ] Idempotent re-ingestion verified
+> Embedding model changed from the brief's OpenAI default to self-hosted Ollama
+> (`nomic-embed-text`, 768-dim) partway through this milestone -- see CLAUDE.md
+> "Environment notes". The dimension in "done when" above is stated as written in the
+> original brief; actual verification below uses 768, matching `db/init/02-schema.sql`.
+
+- [x] `db/init/02-schema.sql`
+- [x] Sample corpus committed to `corpus/sample/`
+- [x] Ingestion workflow (n8n), exported to `workflows/01-ingest.json`
+- [x] `scripts/ingest_check.py` implemented
+- [x] Idempotent re-ingestion verified
+
+### M1 verification (2026-09-11/12, this dev machine)
+
+**Workflow design** (`workflows/01-ingest.json`, 14 nodes): three triggers (manual,
+daily schedule, and a webhook for on-demand re-runs) all feed one pipeline -- read PDFs
+from `/data/corpus/sample` -> extract text -> hash + build document metadata -> check
+existing `content_sha` in Postgres (a dummy-row `LEFT JOIN` guarantees exactly one row
+back per document, changed or not) -> filter to only changed/new documents in a Code
+node -> upsert `documents` row -> delete that document's old chunks -> chunk the text
+-> loop over chunks one at a time (`Split In Batches`, batch size 1 -- Ollama on CPU
+only has one processing slot; firing chunks concurrently made every request queue
+behind the others until n8n's own timeout killed them, so throttling to strictly
+sequential was the fix, not the HTTP node's own batching option, which turned out not
+to throttle anything) -> embed via Ollama's `/api/embeddings` -> insert into `chunks`.
+
+**Run 1** (execution id 6, clean database):
+- Status: success
+- Duration: 1h 20m 37s (22:10:36 -> 23:31:13 UTC) -- CPU-only local inference is the
+  real tradeoff against $0 cost; worth stating plainly in the eventual case study.
+- Result: 15 documents, **2848 chunks**, all confirmed 768-dimensional by
+  `scripts/ingest_check.py`.
+- ~852,230 total tokens processed (chunks.token_count sum; approximate, char-count
+  based, not Ollama's own tokenizer count), avg 299 tokens/chunk.
+- Cost: **$0** -- self-hosted embeddings, no API billed.
+
+**Run 2** (execution id 8, same corpus, unchanged):
+- Status: success
+- Duration: **37 seconds** (vs. 1h20m for run 1)
+- Result: chunk count unchanged at **2848**; document count unchanged at 15
+- Confirmed via Ollama's own logs (`docker compose logs ollama`) that **zero**
+  `/api/embeddings` requests were made in the run-2 time window -- not inferred from
+  timing, checked directly.
+- Cost: **$0** either way, but the token/compute savings from skipping unchanged
+  documents is the real point `content_sha` buys.
+
+**Bonus, unplanned but informative**: the daily Schedule Trigger fired on its own
+(execution id 7) while run 1 was still mid-flight -- a genuine concurrency case, not
+staged. It correctly saw all 15 documents as already-upserted-and-unchanged (documents
+are upserted early, before the slow per-chunk embedding loop) and no-opped safely in 33s.
+Known sharp edge for later: two runs racing on a document that's *actually* changed
+(both deciding "needs reingest" and both deleting/reinserting its chunks concurrently)
+isn't guarded against yet -- fine for a single-schedule production setup, worth a lock
+or dedup key before M7's multi-tenant concurrency goes up.
+
+**Real bugs found and fixed while building this** (kept here because "how it broke and
+why" is exactly the kind of detail that reads as engineering rigor, not something to
+tidy away):
+1. Postgres node context: a plain `DELETE ... WHERE document_id = $1` with no
+   `RETURNING` collapses to a *single* generic output item covering every input item's
+   execution, not one item per input -- breaks downstream `pairedItem`/`itemMatching`
+   with an ambiguous "Multiple matches" error the moment more than one document is in
+   flight. Fixed by wrapping in a CTE with a bare `COUNT(*)` (no `GROUP BY`), which
+   Postgres always returns as exactly one row.
+2. Same root cause, worse case: an `INSERT ... ON CONFLICT DO UPDATE ... WHERE ...
+   RETURNING` guard that's designed to return *zero* rows when content is unchanged
+   collapses ALL-unchanged-item executions into one ambiguous item too -- discovered on
+   the very first idempotency test (run 2 of the *first* workflow version errored
+   instead of succeeding quietly). Fixed by moving the skip-decision out of SQL
+   entirely: a `Check Existing` query that always returns exactly one row (dummy-row
+   `LEFT JOIN`) plus an explicit JS `.filter()` in a Code node, and echoing every field
+   downstream code needs through each SQL round-trip via `RETURNING`/`SELECT $n AS ...`
+   rather than reaching back across node boundaries with `itemMatching`.
+3. n8n's HTTP Request node `options.batching` did not actually throttle concurrent
+   requests in this version (confirmed: ~10-12 embedding calls still fired at once,
+   overloading Ollama's single CPU processing slot until they hit whatever timeout was
+   configured). Fixed with the standard `Split In Batches` loop pattern instead, which
+   did throttle correctly (verified in Ollama's own logs: clean sequential ~200-700ms
+   requests, no more pile-ups).
+4. Host port collisions (native Postgres on 5432, another project's Postgres on 5433) --
+   see the M0 section above; surfaced again here since it's this milestone's DB work
+   that actually exercised it.
 
 ## M2 — Retrieval and chat
 
