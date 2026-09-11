@@ -99,3 +99,12 @@ See [PLAN.md](PLAN.md) for the full list and current checkbox state.
   Worked around by copying `mingw32-make.exe` to `C:\Users\Rinatoh computer\bin\make.exe`
   and adding that folder to the **user** PATH (no admin needed). Open a new terminal for
   `make` to resolve; existing terminals need `mingw32-make` or a restart.
+- The project's parent folder (`Businness 1`) has a space in its path. Considered
+  renaming to `business-1` but decided against it: the hazard (GNU Make's list
+  functions — `$(wildcard)`, `$(words)`, `$(word)`, prerequisite lists, `$(CURDIR)` —
+  silently mis-split on a space, verified empirically) is fully avoidable by never
+  using those Make constructs on absolute paths, which is a rule one author can hold
+  to for a Makefile this small. Docker, git, and Python (pathlib/argv lists) all
+  handle the space correctly already. If this repo ever grows multiple contributors
+  or CI runners with less predictable path handling, revisit the rename — it's cheap
+  to do later, just disruptive to do mid-session.

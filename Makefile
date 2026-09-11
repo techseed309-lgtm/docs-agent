@@ -1,3 +1,11 @@
+# NOTE: this repo's parent folder has a space in its path on at least one dev
+# machine. GNU Make has no way to quote a space inside its list functions
+# ($(wildcard), $(words), $(word), prerequisite lists) or $(CURDIR) — it silently
+# mis-splits them (verified). Rule for every target in this file: never build a
+# file list or absolute path with Make's own functions; only use relative paths
+# and let the shell (which quotes correctly) or Python (argv lists, pathlib) do
+# any path handling. See CLAUDE.md "Environment notes".
+
 .PHONY: up down logs ps reset
 
 up:
