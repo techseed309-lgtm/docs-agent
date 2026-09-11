@@ -1,0 +1,10 @@
+# Keep line endings consistent regardless of the OS this repo is cloned on —
+# this stack ends up running in Docker/Linux even when developed on Windows.
+* text=auto eol=lf
+
+Makefile text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

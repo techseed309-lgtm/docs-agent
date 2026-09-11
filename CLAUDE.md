@@ -1,0 +1,101 @@
+# CLAUDE.md — working agreement and architecture
+
+This file is for whoever (human or Claude Code) is working on this repo next. It's the
+contract for *how* we build, not the sales pitch — that's [README.md](README.md), written
+last.
+
+## What this is
+
+"docs-agent": point it at a folder of documents, it ingests and embeds them on a
+schedule, and exposes a chat endpoint that answers questions from those documents with
+citations. It refuses to answer when the documents don't cover the question.
+
+The product is not the chatbot — the engineering around it is: a versioned workflow
+repo, a repeatable ingestion pipeline, an eval harness with real numbers, cost logging,
+and error handling that doesn't fail silently.
+
+## Stack and hard constraints
+
+- **n8n**, self-hosted via Docker Compose. Never n8n Cloud.
+- **PostgreSQL 16 + pgvector**, one instance, two databases (`n8n`, `vectors`). No
+  Pinecone/Qdrant/Weaviate/etc. — cutting that dependency is a deliberate cost decision
+  and part of the pitch.
+- Embeddings and chat model are **configurable via env vars** (`EMBEDDING_MODEL`,
+  `CHAT_MODEL` in `.env`); default embedding model is OpenAI `text-embedding-3-small`.
+  Never hardcode a model name inside a workflow node — read it from an env/credential
+  expression instead.
+- **Python 3.11+** for scripts. Standard library first; any dependency needs a stated
+  reason the stdlib doesn't cover.
+- Demo UI is **one static HTML file** — no build step, no framework.
+- Everything reproducible from a clean clone with `make up`.
+
+## Repo layout
+
+```
+docs-agent/
+├─ README.md              # case study, written LAST (M6)
+├─ CLAUDE.md              # this file
+├─ PLAN.md                # milestones with checkboxes, kept current
+├─ .env.example           # every var, documented, no real values
+├─ .gitignore
+├─ Makefile                # up, down, logs, ps, reset, (+ import/export/ingest/eval from M1+)
+├─ docker-compose.yml
+├─ db/init/                # 01-databases.sql (M0), 02-schema.sql (M1)
+├─ workflows/              # exported n8n workflow JSON — the source of truth
+├─ scripts/
+│  ├─ n8n_api.py           # export/import workflows via the n8n REST API
+│  ├─ ingest_check.py      # verify chunk counts and embedding dims in Postgres
+│  └─ eval.py              # run the golden set, write a scored report
+├─ eval/
+│  ├─ golden.yaml           # question / expected-source / expected-answer triples
+│  └─ results/              # timestamped JSON + markdown reports
+├─ corpus/sample/           # small public document set, committed
+└─ ui/index.html            # chat demo that calls the n8n webhook
+```
+
+## Architecture (fills in as milestones land)
+
+- **Postgres** is one instance serving two roles: n8n's own operational DB (`n8n`
+  database) and the vector store (`vectors` database, `documents`/`chunks` tables with
+  a pgvector HNSW index — see `db/init/02-schema.sql`, added in M1).
+- **Ingestion workflow** (n8n, M1): reads `corpus/sample/`, chunks, embeds, upserts into
+  `chunks`. Skips unchanged files via `content_sha` so re-ingestion is cheap.
+- **Chat workflow** (n8n, M2): webhook receives a question, embeds it, cosine-searches
+  top-k chunks, assembles a cited prompt, calls the chat model, returns
+  `{answer, sources[], usage}`. Refuses below a relevance floor (`RELEVANCE_THRESHOLD`)
+  instead of guessing.
+- **tenant column** exists in `documents`/`chunks` from day one (default `'default'`).
+  Unused until M7, but it's the seam that turns this into a multi-tenant product later
+  without a schema migration.
+- **Eval harness** (`scripts/eval.py`, M3): scores retrieval hit rate, faithfulness (LLM
+  judge), and refusal accuracy against `eval/golden.yaml`, writes to `eval/results/`.
+
+## Working agreement
+
+- Work **milestone by milestone**. Finish one, show what changed, wait for a go-ahead
+  before starting the next. Don't run ahead.
+- **One git commit per milestone**, conventional-commit style (`feat:`, `chore:`, etc.).
+- **Secrets never enter git.** `.env` is gitignored; `.env.example` is committed with
+  empty values and a one-line comment per var.
+- **Before adding any dependency**, state what it is and why the standard library won't
+  do.
+- **Every script** takes `--help` and fails with a clear message when required env is
+  missing — never a bare traceback.
+- **When a workflow changes**, export it to `workflows/` so the JSON in git stays the
+  truth (`scripts/n8n_api.py export`).
+- **Eval harness before tuning.** M3 (baseline numbers) happens before M4 (tuning) — a
+  number to improve on, not a vibe.
+- **README.md is written at M6, not before.** It's a sales document; it needs the real
+  eval numbers to be worth anything.
+
+## Milestone status
+
+See [PLAN.md](PLAN.md) for the full list and current checkbox state.
+
+## Environment notes (this dev machine)
+
+- Windows, no GNU `make` on PATH by default. Chocolatey install of `make` failed here
+  (needs an elevated shell — lock-file permission error on `C:\ProgramData\chocolatey`).
+  Worked around by copying `mingw32-make.exe` to `C:\Users\Rinatoh computer\bin\make.exe`
+  and adding that folder to the **user** PATH (no admin needed). Open a new terminal for
+  `make` to resolve; existing terminals need `mingw32-make` or a restart.

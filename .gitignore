@@ -1,0 +1,22 @@
+# Secrets — .env.example is the committed template, .env never is.
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# n8n / Docker local state that shouldn't be in git
+# (named volumes hold the real data; nothing here should exist as a bind mount,
+# this is just a safety net if that ever changes)
+n8n_data/
+pgdata/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
