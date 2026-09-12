@@ -4,12 +4,24 @@
 Keeps workflows/*.json in this repo in sync with what's actually running in n8n,
 so the JSON in git is the source of truth (per CLAUDE.md).
 
+Credentials (the Postgres connection workflows use) are NOT stored in workflow
+JSON -- n8n only ever stores a credential ID reference, and IDs are assigned
+per-instance. A workflow exported from one n8n instance and imported into a
+fresh one (a clean clone's first `make up`) would reference a credential ID
+that doesn't exist there. `credentials` (below) closes that gap: it creates the
+credential this repo's workflows expect, by name, idempotently -- and `import`
+re-resolves every node's credential reference to whatever ID that name
+currently has on the target instance, rather than trusting the ID baked into
+the checked-in JSON.
+
 Usage:
+    python scripts/n8n_api.py credentials
+    python scripts/n8n_api.py import --file workflows/01-ingest.json
     python scripts/n8n_api.py export --out workflows/
     python scripts/n8n_api.py export --out workflows/ --name "docs-agent: ingest" --file workflows/01-ingest.json
-    python scripts/n8n_api.py import --file workflows/01-ingest.json
 
-Requires (from .env): N8N_API_BASE_URL, N8N_API_KEY.
+Requires (from .env): N8N_API_BASE_URL, N8N_API_KEY. `credentials` also needs
+POSTGRES_USER, POSTGRES_PASSWORD.
 Uses only the Python standard library (urllib) -- no HTTP client dependency needed
 for a handful of simple JSON REST calls.
 """
@@ -85,6 +97,45 @@ def list_workflows(base_url: str, api_key: str) -> list:
     return workflows
 
 
+def list_credentials(base_url: str, api_key: str) -> list:
+    return api_request(base_url, api_key, "GET", "/api/v1/credentials").get("data", [])
+
+
+# name -> (n8n credential type, fields built from env in cmd_credentials)
+REQUIRED_CREDENTIALS = ["Postgres (vectors)"]
+
+
+def cmd_credentials(args: argparse.Namespace) -> None:
+    env = require_env("N8N_API_BASE_URL", "N8N_API_KEY", "POSTGRES_USER", "POSTGRES_PASSWORD")
+    base_url, api_key = env["N8N_API_BASE_URL"], env["N8N_API_KEY"]
+
+    existing_by_name = {c["name"]: c for c in list_credentials(base_url, api_key)}
+
+    wanted = {
+        "Postgres (vectors)": {
+            "type": "postgres",
+            "data": {
+                "host": "postgres",  # internal Docker network hostname, not localhost
+                "port": 5432,
+                "database": "vectors",
+                "user": env["POSTGRES_USER"],
+                "password": env["POSTGRES_PASSWORD"],
+                "ssl": "disable",
+            },
+        },
+    }
+
+    for name, spec in wanted.items():
+        if name in existing_by_name:
+            print(f"Credential {name!r} already exists (id={existing_by_name[name]['id']}), leaving it as-is.")
+            continue
+        result = api_request(
+            base_url, api_key, "POST", "/api/v1/credentials",
+            {"name": name, "type": spec["type"], "data": spec["data"]},
+        )
+        print(f"Created credential {name!r} (id={result.get('id')})")
+
+
 def cmd_export(args: argparse.Namespace) -> None:
     env = require_env("N8N_API_BASE_URL", "N8N_API_KEY")
     base_url, api_key = env["N8N_API_BASE_URL"], env["N8N_API_KEY"]
@@ -128,6 +179,25 @@ def cmd_import(args: argparse.Namespace) -> None:
     payload = {k: v for k, v in workflow.items() if k in allowed}
     payload.setdefault("settings", {})
 
+    # Credential IDs in the checked-in JSON belong to whatever n8n instance last
+    # exported it -- re-resolve every reference to this instance's current ID for
+    # that credential NAME, or fail with a clear message (never silently import a
+    # workflow pointing at a credential that doesn't exist here).
+    creds_by_name = {c["name"]: c for c in list_credentials(base_url, api_key)}
+    missing = set()
+    for node in payload.get("nodes", []):
+        for cred_type, ref in node.get("credentials", {}).items():
+            name = ref.get("name")
+            if name in creds_by_name:
+                ref["id"] = creds_by_name[name]["id"]
+            else:
+                missing.add(name)
+    if missing:
+        sys.exit(
+            f"Workflow references credential(s) not present on this n8n instance: "
+            f"{', '.join(sorted(missing))}. Run `python scripts/n8n_api.py credentials` first."
+        )
+
     existing = [w for w in list_workflows(base_url, api_key) if w.get("name") == payload.get("name")]
     if existing:
         wf_id = existing[0]["id"]
@@ -135,7 +205,12 @@ def cmd_import(args: argparse.Namespace) -> None:
         print(f"Updated existing workflow {payload.get('name')!r} (id={wf_id})")
     else:
         result = api_request(base_url, api_key, "POST", "/api/v1/workflows", payload)
-        print(f"Created workflow {payload.get('name')!r} (id={result.get('id')})")
+        wf_id = result.get("id")
+        print(f"Created workflow {payload.get('name')!r} (id={wf_id})")
+
+    if not args.no_activate:
+        api_request(base_url, api_key, "POST", f"/api/v1/workflows/{wf_id}/activate")
+        print(f"Activated {payload.get('name')!r}")
 
 
 def main() -> None:
@@ -150,7 +225,11 @@ def main() -> None:
 
     import_p = sub.add_parser("import", help="Create or update a workflow in n8n from a JSON file")
     import_p.add_argument("--file", required=True, help="Path to a workflow JSON file")
+    import_p.add_argument("--no-activate", action="store_true", help="Don't activate the workflow after import")
     import_p.set_defaults(func=cmd_import)
+
+    creds_p = sub.add_parser("credentials", help="Create the n8n credentials workflows in this repo expect (idempotent)")
+    creds_p.set_defaults(func=cmd_credentials)
 
     args = parser.parse_args()
     args.func(args)

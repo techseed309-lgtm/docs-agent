@@ -114,6 +114,56 @@ tidy away):
    see the M0 section above; surfaced again here since it's this milestone's DB work
    that actually exercised it.
 
+### Post-M1 audit: does this actually survive a clean clone?
+
+Asked to make M0/M1 "seamless to continue building over, production quality, no
+placeholders" -- rather than assume the answer was yes, ran an actual
+`make reset && make up && make import && make ingest` from nothing and found two
+real bugs that everything up to this point had been masking:
+
+1. **The workflow couldn't run on anyone else's instance.** It referenced a Postgres
+   credential ID that only existed because I'd created it by hand via the n8n API
+   earlier in this session. A genuinely clean clone's n8n has no such credential --
+   the workflow would fail immediately. Fixed properly, not papered over: added
+   `scripts/n8n_api.py credentials` (creates the credential idempotently, by name)
+   and made `import` re-resolve every node's credential reference to whatever ID that
+   name currently has on the target instance, rather than trusting the ID baked into
+   the checked-in JSON. Wired into a new `make import` target.
+2. **`db/init/02-schema.sql` silently never ran against the right database.** Each
+   file in `docker-entrypoint-initdb.d` is its own `psql` invocation against
+   `POSTGRES_DB` ("postgres") -- `01-databases.sql`'s `\c vectors` does not carry
+   over to the next file. `documents` was quietly being created in the `postgres`
+   database and `CREATE TABLE chunks` was failing outright (`type "vector" does not
+   exist`, since pgvector was only enabled in `vectors`). This had been masked the
+   entire time because the schema had only ever been applied by hand with
+   `-d vectors` explicitly. Fixed by adding `\c vectors` to the top of the file,
+   matching `01-databases.sql`'s own pattern.
+
+Two smaller things fixed in the same pass:
+- `make reset` was dropping `ollama_data` along with the actual state (Postgres/n8n)
+  -- wasteful, since that's a ~2.3GB model cache with nothing precious in it, not
+  something worth re-downloading on every reset. Now only drops `pgdata`/`n8n_data`.
+- PDF-extracted text can contain NUL bytes, which Postgres `text` columns reject
+  outright. None of the 15 NIST PDFs happened to trigger it, but the next corpus
+  swap could have. Stripped in `Prepare Document` before hashing/storing.
+
+Also cleaned up: an orphaned unused credential (Ollama needs no auth, so the
+`ollamaApi` credential created early on was dead weight), two nodes that were
+literally stacked on identical canvas coordinates, several others cramped from an
+earlier redesign, and added three sticky notes in the workflow itself explaining the
+trigger options, the dedup logic, and why the embedding loop is deliberately
+sequential -- so the canvas explains itself to whoever opens it next.
+
+**Re-verified after fixing, from actual nothing** (not re-asserted): `make reset`
+(confirmed only `pgdata`/`n8n_data` dropped, Ollama models survived) -> `make up` ->
+schema tables landed in the `vectors` database automatically, no manual `psql`
+needed -> n8n's owner account recreated via UI (the one step with no API path, by
+n8n's own design) -> `make import` (fresh credential created, fresh workflow created,
+credential reference correctly resolved to the new ID) -> `make ingest` -> **identical
+result**: 15 documents, 2848 chunks, same per-document counts, same `content_sha`
+values as every prior run. 1h00m33s this time (CPU inference time varies run to run;
+not a regression).
+
 ## M2 — Retrieval and chat
 
 Webhook-triggered workflow: embed the question, cosine-search top-k chunks, assemble a
