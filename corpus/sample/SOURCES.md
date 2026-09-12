@@ -19,6 +19,13 @@ Each is the current, non-withdrawn final version as of that date — NIST period
 supersedes these with new revisions; re-check `csrc.nist.gov/pubs/sp800` before relying
 on this list for anything beyond this demo.
 
+**Correction, 2026-09-12**: `NIST.SP.800-88r1.pdf` was fetched with an official
+withdrawal notice already stamped on it (withdrawn 2025-09-26, superseded by SP
+800-88 Rev. 2) that went unnoticed until building the M3 eval set. Replaced with
+`NIST.SP.800-88r2.pdf`, the current final version, and re-ingested (M1's
+content-hash dedup meant only this one document's ~150-250 chunks needed
+re-embedding, not the full corpus).
+
 ## Documents
 
 | File | Publication | Title | Date |
@@ -29,7 +36,7 @@ on this list for anything beyond this demo.
 | `NIST.SP.800-61r3.pdf` | SP 800-61 Rev. 3 | Incident Response Recommendations and Considerations for Cybersecurity Risk Management: A CSF 2.0 Community Profile | Apr 2025 |
 | `NIST.CSWP.29.pdf` | CSWP 29 | The NIST Cybersecurity Framework (CSF) 2.0 | Feb 2024 |
 | `NIST.SP.800-207.pdf` | SP 800-207 | Zero Trust Architecture | Aug 2020 |
-| `NIST.SP.800-88r1.pdf` | SP 800-88 Rev. 1 | Guidelines for Media Sanitization | Dec 2014 |
+| `NIST.SP.800-88r2.pdf` | SP 800-88 Rev. 2 | Guidelines for Media Sanitization | 2025 |
 | `NIST.SP.800-128.pdf` | SP 800-128 | Guide for Security-Focused Configuration Management of Information Systems | Aug 2011 |
 | `NIST.SP.800-83r1.pdf` | SP 800-83 Rev. 1 | Guide to Malware Incident Prevention and Handling for Desktops and Laptops | Jul 2013 |
 | `NIST.SP.800-46r2.pdf` | SP 800-46 Rev. 2 | Guide to Enterprise Telework, Remote Access, and Bring Your Own Device (BYOD) Security | Jul 2016 |
@@ -58,7 +65,7 @@ curl -sL -o NIST.SP.800-171Ar3.pdf  https://nvlpubs.nist.gov/nistpubs/SpecialPub
 curl -sL -o NIST.SP.800-61r3.pdf    https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-61r3.pdf
 curl -sL -o NIST.CSWP.29.pdf        https://nvlpubs.nist.gov/nistpubs/CSWP/NIST.CSWP.29.pdf
 curl -sL -o NIST.SP.800-207.pdf     https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf
-curl -sL -o NIST.SP.800-88r1.pdf    https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-88r1.pdf
+curl -sL -o NIST.SP.800-88r2.pdf    https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-88r2.pdf
 curl -sL -o NIST.SP.800-128.pdf     https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-128.pdf
 curl -sL -o NIST.SP.800-83r1.pdf    https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-83r1.pdf
 curl -sL -o NIST.SP.800-46r2.pdf    https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-46r2.pdf
