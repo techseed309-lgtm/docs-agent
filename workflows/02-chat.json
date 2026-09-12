@@ -1,0 +1,713 @@
+{
+  "id": "y1kboXYkYxIfGbE6",
+  "name": "docs-agent: chat",
+  "description": null,
+  "active": true,
+  "activeVersionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+  "createdAt": "2026-09-12T10:37:15.371Z",
+  "updatedAt": "2026-09-12T10:42:07.780Z",
+  "isArchived": false,
+  "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+  "versionCounter": 2,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "docs-agent-chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "get-question",
+      "name": "Get Question",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const question = ($json.body && $json.body.question || '').trim();\nif (!question) {\n  throw new Error(\"Missing required field: 'question' (POST JSON body: {\\\"question\\\": \\\"...\\\"})\");\n}\nreturn { json: { question } };"
+      }
+    },
+    {
+      "id": "embed-question",
+      "name": "Embed Question",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_BASE_URL }}/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.EMBEDDING_MODEL, prompt: $json.question }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "retrieve-chunks",
+      "name": "Retrieve Chunks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.chunk_index, c.content, d.source_path, d.title,\n       1 - (c.embedding <=> $1::vector) AS similarity\nFROM chunks c\nJOIN documents d ON d.id = c.document_id\nORDER BY c.embedding <=> $1::vector\nLIMIT $2::int",
+        "options": {
+          "queryReplacement": "={{ ['[' + $json.embedding.join(',') + ']', $env.RETRIEVAL_TOP_K] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "7TdAKcnF24wxLqXE",
+          "name": "Postgres (vectors)"
+        }
+      }
+    },
+    {
+      "id": "aggregate-context",
+      "name": "Aggregate Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// items = up to RETRIEVAL_TOP_K chunks, already ordered best-match-first by the SQL query.\nconst threshold = parseFloat($env.RELEVANCE_THRESHOLD || '0.75');\nconst question = $('Get Question').item.json.question;\nconst best = items.length > 0 ? items[0].json.similarity : -1;\nconst refuse = items.length === 0 || best < threshold;\n\nconst sources = items.map((item, i) => ({\n  index: i + 1,\n  source_path: item.json.source_path,\n  title: item.json.title,\n  chunk_index: item.json.chunk_index,\n  similarity: Math.round(item.json.similarity * 1000) / 1000\n}));\n\nconst contextBlock = items\n  .map((item, i) => `[${i + 1}] (${item.json.source_path}, chunk ${item.json.chunk_index}):\\n${item.json.content}`)\n  .join('\\n\\n');\n\nreturn [{\n  json: { refuse, question, sources, contextBlock, bestSimilarity: best, threshold }\n}];"
+      }
+    },
+    {
+      "id": "filter-refuse",
+      "name": "Filter Refuse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        180
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return items.filter(item => item.json.refuse === true);"
+      }
+    },
+    {
+      "id": "build-refusal-response",
+      "name": "Build Refusal Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        180
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    answer: \"I don't have that in these documents.\",\n    sources: [],\n    usage: { prompt_tokens: 0, completion_tokens: 0 }\n  }\n};"
+      }
+    },
+    {
+      "id": "filter-answer",
+      "name": "Filter Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        420
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return items.filter(item => item.json.refuse === false);"
+      }
+    },
+    {
+      "id": "build-chat-prompt",
+      "name": "Build Chat Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        420
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prompt = `You are a compliance assistant. Answer the question using ONLY the numbered sources below -- do not use any outside knowledge. Cite every claim inline with its source number in brackets, like [1] or [2]. If the sources do not fully answer the question, say plainly what is missing instead of guessing.\n\nSources:\n${$json.contextBlock}\n\nQuestion: ${$json.question}\n\nAnswer:`;\nreturn { json: { ...$json, prompt } };"
+      }
+    },
+    {
+      "id": "call-chat-model",
+      "name": "Call Chat Model",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        420
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_BASE_URL }}/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.CHAT_MODEL, prompt: $json.prompt, stream: false }) }}",
+        "options": {
+          "timeout": 300000
+        }
+      }
+    },
+    {
+      "id": "build-answer-response",
+      "name": "Build Answer Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        420
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    answer: $json.response.trim(),\n    sources: $('Aggregate Context').item.json.sources,\n    usage: {\n      prompt_tokens: $json.prompt_eval_count ?? null,\n      completion_tokens: $json.eval_count ?? null\n    }\n  }\n};"
+      }
+    },
+    {
+      "id": "note-refusal",
+      "name": "Sticky Note - Relevance floor",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        -20
+      ],
+      "parameters": {
+        "content": "## Relevance floor\nIf the best-matching chunk's cosine similarity is below RELEVANCE_THRESHOLD (or there are no chunks at all), this branch fires instead of the chat model -- refuses rather than guesses. The chat model is never even called on this path.",
+        "height": 180,
+        "width": 480,
+        "color": 5
+      }
+    },
+    {
+      "id": "note-answer",
+      "name": "Sticky Note - Cited answer",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        620
+      ],
+      "parameters": {
+        "content": "## Cited answer\nEvery source chunk gets a [n] number in the prompt; the model is instructed to cite inline. `sources[]` in the response maps each number back to a real source_path + chunk_index -- a citation is only trustworthy if it's checkable against something real.",
+        "height": 180,
+        "width": 480,
+        "color": 3
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Question": {
+      "main": [
+        [
+          {
+            "node": "Embed Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Question": {
+      "main": [
+        [
+          {
+            "node": "Retrieve Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Chunks": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Context": {
+      "main": [
+        [
+          {
+            "node": "Filter Refuse",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Refuse": {
+      "main": [
+        [
+          {
+            "node": "Build Refusal Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Answer": {
+      "main": [
+        [
+          {
+            "node": "Build Chat Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Chat Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call Chat Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Chat Model": {
+      "main": [
+        [
+          {
+            "node": "Build Answer Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {},
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "y1kboXYkYxIfGbE6",
+      "projectId": "A8m0sGnCFqhe4l8V",
+      "project": {
+        "id": "A8m0sGnCFqhe4l8V",
+        "name": "Benen Mekonnen <mekonnenbenen00@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "429ff6d7-cdbb-48a7-89e4-4064daef5028",
+        "createdAt": "2026-09-12T00:40:52.033Z",
+        "updatedAt": "2026-09-12T00:42:21.827Z"
+      },
+      "createdAt": "2026-09-12T10:37:15.371Z",
+      "updatedAt": "2026-09-12T10:37:15.371Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+    "workflowId": "y1kboXYkYxIfGbE6",
+    "nodes": [
+      {
+        "id": "webhook-trigger",
+        "name": "Webhook Trigger",
+        "webhookId": "docs-agent-chat",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          300
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "chat",
+          "responseMode": "lastNode",
+          "options": {}
+        }
+      },
+      {
+        "id": "get-question",
+        "name": "Get Question",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          220,
+          300
+        ],
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const question = ($json.body && $json.body.question || '').trim();\nif (!question) {\n  throw new Error(\"Missing required field: 'question' (POST JSON body: {\\\"question\\\": \\\"...\\\"})\");\n}\nreturn { json: { question } };"
+        }
+      },
+      {
+        "id": "embed-question",
+        "name": "Embed Question",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          440,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.OLLAMA_BASE_URL }}/api/embeddings",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: $env.EMBEDDING_MODEL, prompt: $json.question }) }}",
+          "options": {
+            "timeout": 60000
+          }
+        }
+      },
+      {
+        "id": "retrieve-chunks",
+        "name": "Retrieve Chunks",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          660,
+          300
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT c.chunk_index, c.content, d.source_path, d.title,\n       1 - (c.embedding <=> $1::vector) AS similarity\nFROM chunks c\nJOIN documents d ON d.id = c.document_id\nORDER BY c.embedding <=> $1::vector\nLIMIT $2::int",
+          "options": {
+            "queryReplacement": "={{ ['[' + $json.embedding.join(',') + ']', $env.RETRIEVAL_TOP_K] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "7TdAKcnF24wxLqXE",
+            "name": "Postgres (vectors)"
+          }
+        }
+      },
+      {
+        "id": "aggregate-context",
+        "name": "Aggregate Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          880,
+          300
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "// items = up to RETRIEVAL_TOP_K chunks, already ordered best-match-first by the SQL query.\nconst threshold = parseFloat($env.RELEVANCE_THRESHOLD || '0.75');\nconst question = $('Get Question').item.json.question;\nconst best = items.length > 0 ? items[0].json.similarity : -1;\nconst refuse = items.length === 0 || best < threshold;\n\nconst sources = items.map((item, i) => ({\n  index: i + 1,\n  source_path: item.json.source_path,\n  title: item.json.title,\n  chunk_index: item.json.chunk_index,\n  similarity: Math.round(item.json.similarity * 1000) / 1000\n}));\n\nconst contextBlock = items\n  .map((item, i) => `[${i + 1}] (${item.json.source_path}, chunk ${item.json.chunk_index}):\\n${item.json.content}`)\n  .join('\\n\\n');\n\nreturn [{\n  json: { refuse, question, sources, contextBlock, bestSimilarity: best, threshold }\n}];"
+        }
+      },
+      {
+        "id": "filter-refuse",
+        "name": "Filter Refuse",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1100,
+          180
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "return items.filter(item => item.json.refuse === true);"
+        }
+      },
+      {
+        "id": "build-refusal-response",
+        "name": "Build Refusal Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1320,
+          180
+        ],
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "return {\n  json: {\n    answer: \"I don't have that in these documents.\",\n    sources: [],\n    usage: { prompt_tokens: 0, completion_tokens: 0 }\n  }\n};"
+        }
+      },
+      {
+        "id": "filter-answer",
+        "name": "Filter Answer",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1100,
+          420
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "return items.filter(item => item.json.refuse === false);"
+        }
+      },
+      {
+        "id": "build-chat-prompt",
+        "name": "Build Chat Prompt",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1320,
+          420
+        ],
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const prompt = `You are a compliance assistant. Answer the question using ONLY the numbered sources below -- do not use any outside knowledge. Cite every claim inline with its source number in brackets, like [1] or [2]. If the sources do not fully answer the question, say plainly what is missing instead of guessing.\n\nSources:\n${$json.contextBlock}\n\nQuestion: ${$json.question}\n\nAnswer:`;\nreturn { json: { ...$json, prompt } };"
+        }
+      },
+      {
+        "id": "call-chat-model",
+        "name": "Call Chat Model",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1540,
+          420
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $env.OLLAMA_BASE_URL }}/api/generate",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: $env.CHAT_MODEL, prompt: $json.prompt, stream: false }) }}",
+          "options": {
+            "timeout": 300000
+          }
+        }
+      },
+      {
+        "id": "build-answer-response",
+        "name": "Build Answer Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1760,
+          420
+        ],
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "return {\n  json: {\n    answer: $json.response.trim(),\n    sources: $('Aggregate Context').item.json.sources,\n    usage: {\n      prompt_tokens: $json.prompt_eval_count ?? null,\n      completion_tokens: $json.eval_count ?? null\n    }\n  }\n};"
+        }
+      },
+      {
+        "id": "note-refusal",
+        "name": "Sticky Note - Relevance floor",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1080,
+          -20
+        ],
+        "parameters": {
+          "content": "## Relevance floor\nIf the best-matching chunk's cosine similarity is below RELEVANCE_THRESHOLD (or there are no chunks at all), this branch fires instead of the chat model -- refuses rather than guesses. The chat model is never even called on this path.",
+          "height": 180,
+          "width": 480,
+          "color": 5
+        }
+      },
+      {
+        "id": "note-answer",
+        "name": "Sticky Note - Cited answer",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1300,
+          620
+        ],
+        "parameters": {
+          "content": "## Cited answer\nEvery source chunk gets a [n] number in the prompt; the model is instructed to cite inline. `sources[]` in the response maps each number back to a real source_path + chunk_index -- a citation is only trustworthy if it's checkable against something real.",
+          "height": 180,
+          "width": 480,
+          "color": 3
+        }
+      }
+    ],
+    "connections": {
+      "Webhook Trigger": {
+        "main": [
+          [
+            {
+              "node": "Get Question",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Question": {
+        "main": [
+          [
+            {
+              "node": "Embed Question",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Embed Question": {
+        "main": [
+          [
+            {
+              "node": "Retrieve Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Retrieve Chunks": {
+        "main": [
+          [
+            {
+              "node": "Aggregate Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aggregate Context": {
+        "main": [
+          [
+            {
+              "node": "Filter Refuse",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Filter Answer",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filter Refuse": {
+        "main": [
+          [
+            {
+              "node": "Build Refusal Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filter Answer": {
+        "main": [
+          [
+            {
+              "node": "Build Chat Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Chat Prompt": {
+        "main": [
+          [
+            {
+              "node": "Call Chat Model",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Call Chat Model": {
+        "main": [
+          [
+            {
+              "node": "Build Answer Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Benen Mekonnen",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-09-12T10:42:07.783Z",
+    "updatedAt": "2026-09-12T10:42:07.783Z",
+    "workflowPublishHistory": [
+      {
+        "id": 8,
+        "workflowId": "y1kboXYkYxIfGbE6",
+        "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+        "event": "activated",
+        "userId": "429ff6d7-cdbb-48a7-89e4-4064daef5028",
+        "createdAt": "2026-09-12T10:42:08.052Z"
+      },
+      {
+        "id": 9,
+        "workflowId": "y1kboXYkYxIfGbE6",
+        "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+        "event": "deactivated",
+        "userId": "429ff6d7-cdbb-48a7-89e4-4064daef5028",
+        "createdAt": "2026-09-12T10:42:08.341Z"
+      },
+      {
+        "id": 10,
+        "workflowId": "y1kboXYkYxIfGbE6",
+        "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+        "event": "activated",
+        "userId": "429ff6d7-cdbb-48a7-89e4-4064daef5028",
+        "createdAt": "2026-09-12T10:42:08.399Z"
+      }
+    ]
+  }
+}

@@ -176,9 +176,57 @@ Must include:
 **Done when:** the webhook answers a question from the sample corpus with correct
 citations, and returns the refusal for a question the corpus doesn't cover.
 
-- [ ] Chat/retrieval workflow (n8n), exported to `workflows/`
-- [ ] Relevance-floor refusal verified
-- [ ] Citation mapping verified
+- [x] Chat/retrieval workflow (n8n), exported to `workflows/02-chat.json`
+- [x] Relevance-floor refusal verified
+- [x] Citation mapping verified
+
+### M2 verification (2026-09-12)
+
+**Workflow design** (`workflows/02-chat.json`, 13 nodes): webhook (`POST /webhook/chat`,
+`{"question": "..."}`) -> validate/extract question -> embed it via Ollama (same
+`nomic-embed-text` model as ingestion -- embeddings from different models aren't
+comparable) -> cosine-search top `RETRIEVAL_TOP_K` chunks in Postgres
+(`1 - (embedding <=> $1)` as similarity, pgvector's own operator, using the HNSW
+index from M1) -> aggregate into one item carrying the best-match score, a numbered
+source list, and a citation-ready context block -> **split here**: below
+`RELEVANCE_THRESHOLD` (or zero matches) goes straight to a refusal response --
+the LLM is never called on that path; at or above it, builds a cited prompt and
+calls Ollama's `llama3.2` for the answer. Same Code-node-filter branching pattern
+as M1's dedup logic (proven reliable there; an IF node was considered and skipped
+for the same reason).
+
+**Answer case** -- "What is zero trust architecture?":
+- All 5 retrieved sources correctly came from `NIST.SP.800-207.pdf` (the actual
+  Zero Trust Architecture publication), similarity 0.79-0.844, all comfortably
+  above the 0.75 threshold.
+- Answer cited `[1]`-`[5]` inline, matching real chunks -- checked, not assumed.
+- Answer explicitly flagged what the sources didn't cover ("it is not explicitly
+  stated... deployment scenarios, and threats") rather than filling the gap with
+  outside knowledge -- exactly the behavior the system prompt asks for.
+- `usage`: 1360 prompt tokens, 245 completion tokens -- real counts from Ollama's
+  own response fields (`prompt_eval_count`/`eval_count`), not estimated.
+- Took 2m39s end to end, ~67s of which was the chat model's one-time cold load
+  into memory (see below) -- not representative of steady-state latency.
+
+**Refusal cases** -- both correct and fast (0.7-0.8s, since the LLM is skipped
+entirely on this path):
+- "What is the best recipe for chocolate chip cookies?" -> refused (unrelated).
+- "What are the HIPAA breach notification requirements for healthcare providers?"
+  -> refused (a harder, more honest test: compliance-adjacent, plausible-sounding,
+  but genuinely not covered by these 15 NIST-only documents -- the threshold
+  discriminates on actual content match, not just topic-area vibes).
+
+**Real issue hit and fixed**: the first test attempt failed with "connection
+aborted" after ~2 minutes. Root cause (checked in Ollama's own logs, not
+guessed): loading the 2GB `llama3.2` model into memory for the very first time
+took longer than the HTTP node's 120s timeout, and got aborted mid-load. This is
+a one-time cold-start cost, not a per-request generation problem -- confirmed by
+calling Ollama directly: `load_duration` was 66.7s, actual generation was 0.35s
+for a trivial prompt. Fixed by raising the timeout to 300s. Not fixed (deferred,
+correctly in M5's scope, not M2's): no retry-with-backoff on this or any other
+external call yet, and a missing `question` field currently surfaces as a bare
+`{"message":"Error in workflow"}` 500 rather than a clean 400 -- both are exactly
+what M5 ("error branch on every external call") is for.
 
 ## M3 — Eval harness
 

@@ -57,6 +57,9 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
       CHAT_MODEL: ${CHAT_MODEL}
+      # M2's chat workflow reads these via $env too -- never hardcoded.
+      RELEVANCE_THRESHOLD: ${RELEVANCE_THRESHOLD}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K}
       # Explicit, not relying on the default: workflows read model names and the
       # Ollama URL via $env in expressions (see above).
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"

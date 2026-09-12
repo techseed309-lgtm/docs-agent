@@ -63,10 +63,14 @@ docs-agent/
   a pgvector HNSW index — see `db/init/02-schema.sql`, added in M1).
 - **Ingestion workflow** (n8n, M1): reads `corpus/sample/`, chunks, embeds, upserts into
   `chunks`. Skips unchanged files via `content_sha` so re-ingestion is cheap.
-- **Chat workflow** (n8n, M2): webhook receives a question, embeds it, cosine-searches
-  top-k chunks, assembles a cited prompt, calls the chat model, returns
-  `{answer, sources[], usage}`. Refuses below a relevance floor (`RELEVANCE_THRESHOLD`)
-  instead of guessing.
+- **Chat workflow** (`workflows/02-chat.json`, M2): webhook receives a question, embeds
+  it, cosine-searches top-k chunks, assembles a cited prompt, calls the chat model,
+  returns `{answer, sources[], usage}`. Refuses below a relevance floor
+  (`RELEVANCE_THRESHOLD`) instead of guessing -- and skips calling the chat model
+  entirely on that path. Note: Ollama unloads an idle model after a few minutes, so
+  the first chat call after a lull pays a real one-time load cost (~60-70s for
+  `llama3.2` on this machine) before generation even starts; the HTTP node's timeout
+  is set generously (300s) to absorb that, not because generation itself is slow.
 - **tenant column** exists in `documents`/`chunks` from day one (default `'default'`).
   Unused until M7, but it's the seam that turns this into a multi-tenant product later
   without a schema migration.
