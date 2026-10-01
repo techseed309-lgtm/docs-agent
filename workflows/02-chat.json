@@ -3,12 +3,12 @@
   "name": "docs-agent: chat",
   "description": null,
   "active": true,
-  "activeVersionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+  "activeVersionId": "91403b5c-fcca-4c4b-825d-d584a7517545",
   "createdAt": "2026-09-12T10:37:15.371Z",
-  "updatedAt": "2026-09-12T10:42:07.780Z",
+  "updatedAt": "2026-09-12T12:02:23.796Z",
   "isArchived": false,
-  "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
-  "versionCounter": 2,
+  "versionId": "91403b5c-fcca-4c4b-825d-d584a7517545",
+  "versionCounter": 3,
   "sourceWorkflowId": null,
   "triggerCount": 1,
   "nodes": [
@@ -97,7 +97,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// items = up to RETRIEVAL_TOP_K chunks, already ordered best-match-first by the SQL query.\nconst threshold = parseFloat($env.RELEVANCE_THRESHOLD || '0.75');\nconst question = $('Get Question').item.json.question;\nconst best = items.length > 0 ? items[0].json.similarity : -1;\nconst refuse = items.length === 0 || best < threshold;\n\nconst sources = items.map((item, i) => ({\n  index: i + 1,\n  source_path: item.json.source_path,\n  title: item.json.title,\n  chunk_index: item.json.chunk_index,\n  similarity: Math.round(item.json.similarity * 1000) / 1000\n}));\n\nconst contextBlock = items\n  .map((item, i) => `[${i + 1}] (${item.json.source_path}, chunk ${item.json.chunk_index}):\\n${item.json.content}`)\n  .join('\\n\\n');\n\nreturn [{\n  json: { refuse, question, sources, contextBlock, bestSimilarity: best, threshold }\n}];"
+        "jsCode": "// items = up to RETRIEVAL_TOP_K chunks, already ordered best-match-first by the SQL query.\nconst threshold = parseFloat($env.RELEVANCE_THRESHOLD || '0.75');\nconst question = $('Get Question').item.json.question;\nconst best = items.length > 0 ? items[0].json.similarity : -1;\nconst refuse = items.length === 0 || best < threshold;\n\nconst sources = items.map((item, i) => ({\n  index: i + 1,\n  source_path: item.json.source_path,\n  title: item.json.title,\n  chunk_index: item.json.chunk_index,\n  similarity: Math.round(item.json.similarity * 1000) / 1000,\n  content: item.json.content\n}));\n\nconst contextBlock = items\n  .map((item, i) => `[${i + 1}] (${item.json.source_path}, chunk ${item.json.chunk_index}):\\n${item.json.content}`)\n  .join('\\n\\n');\n\nreturn [{\n  json: { refuse, question, sources, contextBlock, bestSimilarity: best, threshold }\n}];"
       }
     },
     {
@@ -172,7 +172,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ model: $env.CHAT_MODEL, prompt: $json.prompt, stream: false }) }}",
         "options": {
-          "timeout": 300000
+          "timeout": 600000
         }
       }
     },
@@ -356,7 +356,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+    "versionId": "91403b5c-fcca-4c4b-825d-d584a7517545",
     "workflowId": "y1kboXYkYxIfGbE6",
     "nodes": [
       {
@@ -444,7 +444,7 @@
         ],
         "parameters": {
           "mode": "runOnceForAllItems",
-          "jsCode": "// items = up to RETRIEVAL_TOP_K chunks, already ordered best-match-first by the SQL query.\nconst threshold = parseFloat($env.RELEVANCE_THRESHOLD || '0.75');\nconst question = $('Get Question').item.json.question;\nconst best = items.length > 0 ? items[0].json.similarity : -1;\nconst refuse = items.length === 0 || best < threshold;\n\nconst sources = items.map((item, i) => ({\n  index: i + 1,\n  source_path: item.json.source_path,\n  title: item.json.title,\n  chunk_index: item.json.chunk_index,\n  similarity: Math.round(item.json.similarity * 1000) / 1000\n}));\n\nconst contextBlock = items\n  .map((item, i) => `[${i + 1}] (${item.json.source_path}, chunk ${item.json.chunk_index}):\\n${item.json.content}`)\n  .join('\\n\\n');\n\nreturn [{\n  json: { refuse, question, sources, contextBlock, bestSimilarity: best, threshold }\n}];"
+          "jsCode": "// items = up to RETRIEVAL_TOP_K chunks, already ordered best-match-first by the SQL query.\nconst threshold = parseFloat($env.RELEVANCE_THRESHOLD || '0.75');\nconst question = $('Get Question').item.json.question;\nconst best = items.length > 0 ? items[0].json.similarity : -1;\nconst refuse = items.length === 0 || best < threshold;\n\nconst sources = items.map((item, i) => ({\n  index: i + 1,\n  source_path: item.json.source_path,\n  title: item.json.title,\n  chunk_index: item.json.chunk_index,\n  similarity: Math.round(item.json.similarity * 1000) / 1000,\n  content: item.json.content\n}));\n\nconst contextBlock = items\n  .map((item, i) => `[${i + 1}] (${item.json.source_path}, chunk ${item.json.chunk_index}):\\n${item.json.content}`)\n  .join('\\n\\n');\n\nreturn [{\n  json: { refuse, question, sources, contextBlock, bestSimilarity: best, threshold }\n}];"
         }
       },
       {
@@ -519,7 +519,7 @@
           "specifyBody": "json",
           "jsonBody": "={{ JSON.stringify({ model: $env.CHAT_MODEL, prompt: $json.prompt, stream: false }) }}",
           "options": {
-            "timeout": 300000
+            "timeout": 600000
           }
         }
       },
@@ -681,32 +681,32 @@
     "name": null,
     "description": null,
     "autosaved": false,
-    "createdAt": "2026-09-12T10:42:07.783Z",
-    "updatedAt": "2026-09-12T10:42:07.783Z",
+    "createdAt": "2026-09-12T12:02:23.804Z",
+    "updatedAt": "2026-09-12T12:02:23.804Z",
     "workflowPublishHistory": [
       {
-        "id": 8,
+        "id": 12,
         "workflowId": "y1kboXYkYxIfGbE6",
-        "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+        "versionId": "91403b5c-fcca-4c4b-825d-d584a7517545",
         "event": "activated",
         "userId": "429ff6d7-cdbb-48a7-89e4-4064daef5028",
-        "createdAt": "2026-09-12T10:42:08.052Z"
+        "createdAt": "2026-09-12T12:02:24.015Z"
       },
       {
-        "id": 9,
+        "id": 13,
         "workflowId": "y1kboXYkYxIfGbE6",
-        "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+        "versionId": "91403b5c-fcca-4c4b-825d-d584a7517545",
         "event": "deactivated",
         "userId": "429ff6d7-cdbb-48a7-89e4-4064daef5028",
-        "createdAt": "2026-09-12T10:42:08.341Z"
+        "createdAt": "2026-09-12T12:02:25.167Z"
       },
       {
-        "id": 10,
+        "id": 14,
         "workflowId": "y1kboXYkYxIfGbE6",
-        "versionId": "f55fe71b-ff7c-41fb-95b5-f132c0c0093d",
+        "versionId": "91403b5c-fcca-4c4b-825d-d584a7517545",
         "event": "activated",
         "userId": "429ff6d7-cdbb-48a7-89e4-4064daef5028",
-        "createdAt": "2026-09-12T10:42:08.399Z"
+        "createdAt": "2026-09-12T12:02:25.222Z"
       }
     ]
   }

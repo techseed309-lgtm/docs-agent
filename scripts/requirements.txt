@@ -5,3 +5,9 @@
 # This is the standard, most-documented driver; the "-binary" build ships a
 # prebuilt wheel so no C compiler/toolchain is needed on the dev machine.
 psycopg2-binary==2.9.10
+
+# PyYAML: eval/golden.yaml is YAML per the brief's own spec, and the standard
+# library has no YAML parser at all (json won't read it; hand-rolling a parser
+# for a well-known format like YAML is exactly the kind of reinvention the
+# "stdlib first" rule is meant to prevent, not encourage).
+PyYAML==6.0.3

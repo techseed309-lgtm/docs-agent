@@ -1,18 +1,163 @@
 # Golden question set for scripts/eval.py.
 #
-# Populated in Milestone 3, once corpus/sample/ has real documents. Each entry
-# will look like:
+# Every answerable question below was written after actually reading the source PDF
+# (via pdftotext), not from memory of what a NIST document "probably" says -- wrong
+# facts here would make the retrieval hit-rate score meaningless. expected_source is
+# what retrieval hit rate checks against; expected_answer is a human sanity check,
+# not used by the automated scorer (faithfulness is judged against the system's own
+# retrieved chunks, not against this field).
 #
-# - question: "What is the refund window for annual plans?"
-#   expected_source: "corpus/sample/refund-policy.md"
-#   expected_answer: "30 days from purchase date."
-#   should_refuse: false
-#
-# - question: "What's the CEO's home address?"
-#   expected_source: null
-#   expected_answer: null
-#   should_refuse: true
-#
-# Target: 20-30 entries total, at least 5 with should_refuse: true.
+# 20 answerable questions (covering all 15 corpus documents) + 8 refusals: two
+# genuinely unrelated (a sanity floor), six topically-adjacent-but-uncovered --
+# including one that names a real NIST publication (SP 800-53) that is NOT in this
+# corpus, deliberately the hardest case: same publisher, same domain, plausible, but
+# absent from these specific 15 documents.
 
-questions: []
+questions:
+  - question: "What are the six Functions of the NIST Cybersecurity Framework 2.0?"
+    expected_source: "corpus/sample/NIST.CSWP.29.pdf"
+    expected_answer: "Govern, Identify, Protect, Detect, Respond, and Recover."
+    should_refuse: false
+
+  - question: "What is the purpose of NIST SP 800-115?"
+    expected_source: "corpus/sample/NIST.SP.800-115.pdf"
+    expected_answer: "Guidance for planning and conducting technical information security tests and assessments, analyzing findings, and developing mitigation strategies."
+    should_refuse: false
+
+  - question: "What does NIST SP 800-128 provide guidance on?"
+    expected_source: "corpus/sample/NIST.SP.800-128.pdf"
+    expected_answer: "Security-focused configuration management (SecCM) of information systems, supporting the Monitor step of the Risk Management Framework."
+    should_refuse: false
+
+  - question: "What does ISCM stand for and what is its purpose, per NIST SP 800-137?"
+    expected_source: "corpus/sample/NIST.SP.800-137.pdf"
+    expected_answer: "Information Security Continuous Monitoring -- maintaining ongoing awareness of security posture, vulnerabilities, and threats to support risk management decisions."
+    should_refuse: false
+
+  - question: "What three assessment methods does NIST SP 800-171A define for assessing security requirements?"
+    expected_source: "corpus/sample/NIST.SP.800-171Ar3.pdf"
+    expected_answer: "Examine, interview, and test."
+    should_refuse: false
+
+  - question: "How many security requirement families does NIST SP 800-171 Revision 3 organize its controls into?"
+    expected_source: "corpus/sample/NIST.SP.800-171r3.pdf"
+    expected_answer: "17 families."
+    should_refuse: false
+
+  - question: "What is NIST SP 800-18 Revision 2 a guide for developing?"
+    expected_source: "corpus/sample/NIST.SP.800-18r2.pdf"
+    expected_answer: "Security, privacy, and cybersecurity supply chain risk management plans for federal information systems."
+    should_refuse: false
+
+  - question: "According to NIST SP 800-207, does zero trust grant any implicit trust to assets or accounts based on their network location?"
+    expected_source: "corpus/sample/NIST.SP.800-207.pdf"
+    expected_answer: "No -- zero trust assumes no implicit trust based solely on physical/network location or asset ownership."
+    should_refuse: false
+
+  - question: "What does zero trust architecture focus on protecting, instead of network segments?"
+    expected_source: "corpus/sample/NIST.SP.800-207.pdf"
+    expected_answer: "Resources -- assets, services, workflows, and network accounts."
+    should_refuse: false
+
+  - question: "What are the four steps in the risk management process described in NIST SP 800-30?"
+    expected_source: "corpus/sample/NIST.SP.800-30r1.pdf"
+    expected_answer: "Framing risk, assessing risk, responding to risk, and monitoring risk."
+    should_refuse: false
+
+  - question: "What is the purpose of NIST SP 800-30?"
+    expected_source: "corpus/sample/NIST.SP.800-30r1.pdf"
+    expected_answer: "Guidance for conducting risk assessments of federal information systems and organizations, amplifying SP 800-39."
+    should_refuse: false
+
+  - question: "What does NIST SP 800-46 Revision 2 provide security guidance on?"
+    expected_source: "corpus/sample/NIST.SP.800-46r2.pdf"
+    expected_answer: "Enterprise telework, remote access, and bring-your-own-device (BYOD) technologies."
+    should_refuse: false
+
+  - question: "What framework does NIST SP 800-61 Revision 3 map its incident response recommendations to?"
+    expected_source: "corpus/sample/NIST.SP.800-61r3.pdf"
+    expected_answer: "The NIST Cybersecurity Framework (CSF) 2.0's six functions."
+    should_refuse: false
+
+  - question: "How many authentication assurance levels does NIST SP 800-63B-4 define?"
+    expected_source: "corpus/sample/NIST.SP.800-63B-4.pdf"
+    expected_answer: "Three (AAL1, AAL2, AAL3)."
+    should_refuse: false
+
+  - question: "What is required for an application assessed at Authentication Assurance Level 2 (AAL2)?"
+    expected_source: "corpus/sample/NIST.SP.800-63B-4.pdf"
+    expected_answer: "Proof of possession and control of two distinct authentication factors, and a phishing-resistant authentication option must be offered."
+    should_refuse: false
+
+  - question: "How does NIST SP 800-83 Revision 1 define malware?"
+    expected_source: "corpus/sample/NIST.SP.800-83r1.pdf"
+    expected_answer: "A program covertly inserted into another program with intent to destroy data, run destructive/intrusive programs, or compromise confidentiality, integrity, or availability."
+    should_refuse: false
+
+  - question: "What are the three sanitization methods described in NIST SP 800-88 Revision 2?"
+    expected_source: "corpus/sample/NIST.SP.800-88r2.pdf"
+    expected_answer: "Clear, Purge, and Destroy."
+    should_refuse: false
+
+  - question: "What five processes make up computer security log management according to NIST SP 800-92?"
+    expected_source: "corpus/sample/NIST.SP.800-92.pdf"
+    expected_answer: "Generating, transmitting, storing, analyzing, and disposing of log data."
+    should_refuse: false
+
+  - question: "What US regulations does NIST SP 800-92 mention as reasons organizations store and analyze security logs?"
+    expected_source: "corpus/sample/NIST.SP.800-92.pdf"
+    expected_answer: "FISMA, HIPAA, SOX, GLBA, and PCI DSS."
+    should_refuse: false
+
+  - question: "What are the permitted uses for BYOD devices discussed in NIST SP 800-46 Revision 2?"
+    expected_source: "corpus/sample/NIST.SP.800-46r2.pdf"
+    expected_answer: "Security considerations and recommendations for organization-issued and personally-owned (BYOD) client devices used for telework and remote access."
+    should_refuse: false
+
+  # -- Refusals: two genuinely unrelated, six topically-adjacent-but-uncovered --
+
+  - question: "What is the best recipe for chocolate chip cookies?"
+    expected_source: null
+    expected_answer: null
+    should_refuse: true
+
+  - question: "What is the capital of France?"
+    expected_source: null
+    expected_answer: null
+    should_refuse: true
+
+  - question: "What are the HIPAA breach notification requirements for healthcare providers?"
+    expected_source: null
+    expected_answer: null
+    should_refuse: true
+
+  - question: "What is the GDPR's required timeline for reporting a personal data breach?"
+    expected_source: null
+    expected_answer: null
+    should_refuse: true
+
+  - question: "What are the PCI-DSS requirements for encrypting stored cardholder data?"
+    expected_source: null
+    expected_answer: null
+    should_refuse: true
+
+  - question: "What access control requirements does NIST SP 800-53 Revision 5 specify?"
+    # Deliberately the hardest refusal case: SP 800-53 is a real NIST publication in
+    # the exact same domain as this corpus, but it is NOT one of the 15 documents
+    # ingested -- correctly refusing this requires matching actual content, not
+    # just "is this cybersecurity-shaped and NIST-shaped."
+    expected_source: null
+    expected_answer: null
+    should_refuse: true
+
+  - question: "How much does a typical NIST SP 800-171 compliance assessment cost?"
+    # SP 800-171 IS in the corpus, but nothing in these guidance documents states a
+    # price -- tests that a merely-related document isn't enough to avoid refusal.
+    expected_source: null
+    expected_answer: null
+    should_refuse: true
+
+  - question: "What is ISO/IEC 27001's certification renewal cycle?"
+    expected_source: null
+    expected_answer: null
+    should_refuse: true

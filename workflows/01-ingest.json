@@ -100,7 +100,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const crypto = require('crypto');\nconst fileName = $('Read PDFs').item.binary.data.fileName || 'unknown.pdf';\nconst text = ($json.text || '').replace(/\\u0000/g, '');\nconst contentSha = crypto.createHash('sha256').update(text).digest('hex');\nconst title = fileName.replace(/\\.pdf$/i, '');\nreturn {\n  json: {\n    source_path: `corpus/sample/${fileName}`,\n    title,\n    tenant: 'default',\n    content_sha: contentSha,\n    text\n  }\n};"
+        "jsCode": "const crypto = require('crypto');\nconst fileName = $('Read PDFs').item.binary.data.fileName || 'unknown.pdf';\nconst text = ($json.text || '')\n  // Strip C0/C1 control characters (bullet-glyph and similar PDF-extraction\n  // artifacts land here as raw control bytes) except tab/newline/CR. Broadened\n  // from a NUL-only strip after one made it into a chat prompt and Ollama\n  // rejected the request outright -- see PLAN.md M3.\n  .replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F-\\x9F]/g, '');\nconst contentSha = crypto.createHash('sha256').update(text).digest('hex');\nconst title = fileName.replace(/\\.pdf$/i, '');\nreturn {\n  json: {\n    source_path: `corpus/sample/${fileName}`,\n    title,\n    tenant: 'default',\n    content_sha: contentSha,\n    text\n  }\n};"
       }
     },
     {
@@ -592,7 +592,7 @@
         ],
         "parameters": {
           "mode": "runOnceForEachItem",
-          "jsCode": "const crypto = require('crypto');\nconst fileName = $('Read PDFs').item.binary.data.fileName || 'unknown.pdf';\nconst text = ($json.text || '').replace(/\\u0000/g, '');\nconst contentSha = crypto.createHash('sha256').update(text).digest('hex');\nconst title = fileName.replace(/\\.pdf$/i, '');\nreturn {\n  json: {\n    source_path: `corpus/sample/${fileName}`,\n    title,\n    tenant: 'default',\n    content_sha: contentSha,\n    text\n  }\n};"
+          "jsCode": "const crypto = require('crypto');\nconst fileName = $('Read PDFs').item.binary.data.fileName || 'unknown.pdf';\nconst text = ($json.text || '')\n  // Strip C0/C1 control characters (bullet-glyph and similar PDF-extraction\n  // artifacts land here as raw control bytes) except tab/newline/CR. Broadened\n  // from a NUL-only strip after one made it into a chat prompt and Ollama\n  // rejected the request outright -- see PLAN.md M3.\n  .replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F-\\x9F]/g, '');\nconst contentSha = crypto.createHash('sha256').update(text).digest('hex');\nconst title = fileName.replace(/\\.pdf$/i, '');\nreturn {\n  json: {\n    source_path: `corpus/sample/${fileName}`,\n    title,\n    tenant: 'default',\n    content_sha: contentSha,\n    text\n  }\n};"
         }
       },
       {

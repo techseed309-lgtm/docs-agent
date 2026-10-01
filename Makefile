@@ -6,7 +6,7 @@
 # and let the shell (which quotes correctly) or Python (argv lists, pathlib) do
 # any path handling. See CLAUDE.md "Environment notes".
 
-.PHONY: up down logs ps reset import export ingest
+.PHONY: up down logs ps reset import export ingest eval
 
 up:
 	docker compose up -d
@@ -44,6 +44,12 @@ export:
 # the daily schedule or opening the n8n UI.
 ingest:
 	@. ./.env; curl -s -X POST "http://localhost:$${N8N_PORT}/webhook/ingest-trigger" -w "\nHTTP %{http_code}\n"
+
+# Runs eval/golden.yaml against the chat webhook and writes a scored report to
+# eval/results/. Slow (each answered question is a real chat-model generation);
+# that's the cost of a number you can trust over a vibe.
+eval:
+	python scripts/eval.py
 
 # Drops the postgres + n8n volumes (all ingested data, n8n's workflows/credentials/
 # owner account) -- but NOT ollama_data, deliberately: that's just a ~2.3GB model
